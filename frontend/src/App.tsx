@@ -6,7 +6,9 @@ import axios from 'axios'
 const { Header, Content, Footer } = Layout
 const { Title } = Typography
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
+// Prefer configured base, otherwise default to current host with port 8000
+const API_BASE = import.meta.env.VITE_API_BASE
+  || `${window.location.protocol}//${window.location.hostname}:${import.meta.env.VITE_API_PORT || '8000'}`
 
 function App() {
   const [states, setStates] = useState<string[]>([])

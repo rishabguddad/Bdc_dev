@@ -66,6 +66,52 @@ def get_settings() -> Settings:
             value = value.strip()
             # Do not overwrite pre-set envs
             os.environ.setdefault(name, value)
+    # Support per-variable encryption for DB credentials
+    # Convention: wrap encrypted value as ENC(<fernet-token>)
+    def _maybe_decrypt_env(name: str) -> None:
+        value = os.getenv(name)
+        if not value:
+            return
+        if value.startswith("ENC(") and value.endswith(")"):
+            key = os.getenv("ENV_ENC_KEY")
+            if not key:
+                raise RuntimeError(
+                    f"{name} is encrypted. Set ENV_ENC_KEY to decrypt."
+                )
+            if Fernet is None:
+                raise RuntimeError(
+                    "cryptography is required to decrypt encrypted env values."
+                )
+            token = value[4:-1]
+            try:
+                decrypted = Fernet(key.encode("utf-8")).decrypt(
+                    token.encode("utf-8")
+                ).decode("utf-8")
+            except InvalidToken as exc:  # type: ignore
+                raise RuntimeError(f"Failed to decrypt {name} with provided ENV_ENC_KEY") from exc
+            os.environ[name] = decrypted
+
+    # If a plaintext .env exists, pre-load its values for DB_USER/DB_PASSWORD and decrypt if needed.
+    # Doing this before constructing Settings ensures environment variables override .env values inside Pydantic.
+    env_path = BASE_DIR / ".env"
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            name, value = stripped.split("=", 1)
+            name = name.strip()
+            value = value.strip()
+            if name not in ("DB_USER", "DB_PASSWORD"):
+                continue
+            # If the process env already defines a clear value, keep it.
+            if os.getenv(name) and not os.getenv(name, "").startswith("ENC("):
+                continue
+            os.environ[name] = value
+
+    # Only decrypt sensitive fields if wrapped after potential pre-load
+    _maybe_decrypt_env("DB_USER")
+    _maybe_decrypt_env("DB_PASSWORD")
     return Settings()
 
 class PgPool:
