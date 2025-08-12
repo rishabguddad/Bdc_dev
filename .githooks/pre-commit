@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Block committing plaintext env files or encrypted env by default
+blocked_patterns=(
+  "(^|/)\.env($|\.)"
+  "(^|/)\.env\.enc$"
+)
+
+staged=$(git diff --cached --name-only)
+if [ -z "$staged" ]; then
+  exit 0
+fi
+
+found_blocked=()
+while IFS= read -r file; do
+  for pat in "${blocked_patterns[@]}"; do
+    if [[ $file =~ $pat ]]; then
+      found_blocked+=("$file")
+      break
+    fi
+  done
+done <<< "$staged"
+
+if [ ${#found_blocked[@]} -gt 0 ]; then
+  echo "\n✖ Blocking commit: sensitive env files staged:" >&2
+  for f in "${found_blocked[@]}"; do
+    echo "  - $f" >&2
+  done
+  echo "\nIf you really intend to commit, pass --no-verify (not recommended)." >&2
+  exit 1
+fi
+
+exit 0
+

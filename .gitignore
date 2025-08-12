@@ -1,0 +1,31 @@
+# General
+.DS_Store
+.idea/
+.vscode/
+*.log
+.python-version
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.venv/
+
+# Node / Vite
+frontend/node_modules/
+frontend/dist/
+
+# Env files (do not commit secrets)
+.env
+.env.*
+backend/.env
+backend/.env.*
+frontend/.env
+frontend/.env.*
+
+# Encrypted env (keep out of git by default)
+backend/.env.enc
+frontend/.env.enc
+
