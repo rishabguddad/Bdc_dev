@@ -6,6 +6,14 @@ from queue import Queue
 from concurrent.futures import ThreadPoolExecutor
 import asyncio
 from pathlib import Path
+import os
+
+try:
+    # Optional dependency; only needed if using encrypted .env
+    from cryptography.fernet import Fernet, InvalidToken  # type: ignore
+except Exception:  # pragma: no cover - treat as optional
+    Fernet = None  # type: ignore
+    InvalidToken = Exception  # type: ignore
 
 _executor = ThreadPoolExecutor(max_workers=10)
 
@@ -24,6 +32,40 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """
+    Load settings. If an encrypted env file exists at `.env.enc` and
+    the decryption key `ENV_ENC_KEY` is set, transparently decrypt it
+    into environment variables prior to Pydantic loading.
+    """
+    enc_path = BASE_DIR / ".env.enc"
+    if enc_path.exists():
+        key = os.getenv("ENV_ENC_KEY")
+        if not key:
+            raise RuntimeError(
+                "Encrypted env detected at .env.enc but ENV_ENC_KEY is not set."
+            )
+        if Fernet is None:
+            raise RuntimeError(
+                "cryptography is required to decrypt .env.enc. Please install requirements."
+            )
+        fernet = Fernet(key.encode("utf-8"))
+        try:
+            ciphertext = enc_path.read_bytes()
+            plaintext = fernet.decrypt(ciphertext).decode("utf-8")
+        except InvalidToken as exc:  # type: ignore
+            raise RuntimeError("Invalid ENV_ENC_KEY for decrypting .env.enc") from exc
+        # Parse plaintext .env content and inject into process env
+        for line in plaintext.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" not in stripped:
+                continue
+            name, value = stripped.split("=", 1)
+            name = name.strip()
+            value = value.strip()
+            # Do not overwrite pre-set envs
+            os.environ.setdefault(name, value)
     return Settings()
 
 class PgPool:
