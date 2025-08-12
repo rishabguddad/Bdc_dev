@@ -47,6 +47,29 @@ def decrypt_env(input_path: Path, output_path: Optional[Path], key: Optional[str
         write_text_file(output_path, plaintext)
 
 
+def encrypt_value(value: str, key: Optional[str]) -> str:
+    if key is None:
+        key = os.getenv("ENV_ENC_KEY")
+    if not key:
+        raise SystemExit("Missing key. Provide --key or set ENV_ENC_KEY.")
+    f = Fernet(key.encode("utf-8"))
+    token = f.encrypt(value.encode("utf-8")).decode("utf-8")
+    return f"ENC({token})"
+
+
+def decrypt_value(value: str, key: Optional[str]) -> str:
+    if key is None:
+        key = os.getenv("ENV_ENC_KEY")
+    if not key:
+        raise SystemExit("Missing key. Provide --key or set ENV_ENC_KEY.")
+    if value.startswith("ENC(") and value.endswith(")"):
+        token = value[4:-1]
+    else:
+        token = value
+    f = Fernet(key.encode("utf-8"))
+    return f.decrypt(token.encode("utf-8")).decode("utf-8")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Encrypt/decrypt .env files using Fernet")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -63,6 +86,15 @@ def main() -> None:
     dec.add_argument("-o", "--output", type=Path, default=None, help="Optional output plaintext path; prints to stdout if omitted")
     dec.add_argument("--key", type=str, default=None, help="Fernet key (base64). If omitted, uses ENV_ENC_KEY")
 
+    # Value-level helpers
+    val_enc = sub.add_parser("encrypt-value", help="Encrypt a single value and wrap as ENC(...)")
+    val_enc.add_argument("value", type=str, help="Plaintext value to encrypt")
+    val_enc.add_argument("--key", type=str, default=None, help="Fernet key (base64). If omitted, uses ENV_ENC_KEY")
+
+    val_dec = sub.add_parser("decrypt-value", help="Decrypt a single value (accepts raw token or ENC(...))")
+    val_dec.add_argument("value", type=str, help="Encrypted token or ENC(token)")
+    val_dec.add_argument("--key", type=str, default=None, help="Fernet key (base64). If omitted, uses ENV_ENC_KEY")
+
     args = parser.parse_args()
 
     if args.cmd == "gen-key":
@@ -74,6 +106,10 @@ def main() -> None:
         decrypt_env(args.input, args.output, args.key)
         if args.output:
             print(f"Decrypted {args.input} -> {args.output}")
+    elif args.cmd == "encrypt-value":
+        print(encrypt_value(args.value, args.key))
+    elif args.cmd == "decrypt-value":
+        print(decrypt_value(args.value, args.key))
 
 
 if __name__ == "__main__":

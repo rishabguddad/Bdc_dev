@@ -72,6 +72,33 @@ python webapp/backend/app/envsec.py decrypt webapp/backend/.env.enc -o webapp/ba
 
 Prefer editing a temporary `.env` and re-encrypting.
 
+### Encrypt only DB_USER and DB_PASSWORD inside plaintext `.env`
+
+If you prefer to keep `.env` plaintext but hide just credentials, you can encrypt only `DB_USER` and `DB_PASSWORD` values and wrap them as `ENC(<token>)`. The app will decrypt these two at startup when `ENV_ENC_KEY` is set.
+
+Example `.env`:
+
+```
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=bdc_dev
+DB_USER=ENC(<paste-token-here>)
+DB_PASSWORD=ENC(<paste-token-here>)
+```
+
+Create tokens:
+
+```
+python webapp/backend/app/envsec.py encrypt-value "your_db_user" --key <key>
+python webapp/backend/app/envsec.py encrypt-value "your_db_password" --key <key>
+```
+
+Optionally verify:
+
+```
+python webapp/backend/app/envsec.py decrypt-value "ENC(<token>)" --key <key>
+```
+
 ## Git safeguards
 
 - The repo is configured to ignore env files via root `.gitignore`.
