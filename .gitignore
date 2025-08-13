@@ -29,3 +29,15 @@ frontend/.env.*
 backend/.env.enc
 frontend/.env.enc
 
+node_modules/
+.env
+.env.*
+backend/.env
+backend/app/.env
+frontend/.env
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+frontend/node_modules/
