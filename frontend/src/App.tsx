@@ -1,6 +1,6 @@
 import React from 'react'
-import { useEffect, useMemo, useState } from 'react'
-import { Layout, Typography, Select, Button, Space, Table, message, Tag } from 'antd'
+import { useEffect, useState } from 'react'
+import { Layout, Typography, Select, Button, Space, message, Divider, Card, Row, Col, Tag } from 'antd'
 import axios from 'axios'
 
 const { Header, Content, Footer } = Layout
@@ -15,9 +15,9 @@ function App() {
   const [state, setState] = useState<string>()
   const [counties, setCounties] = useState<string[]>([])
   const [countySelection, setCountySelection] = useState<string[]>([])
-  const [report, setReport] = useState<string>()
   const [loading, setLoading] = useState(false)
-  const [data, setData] = useState<{columns: string[]; rows: any[][]}>({columns: [], rows: []})
+  const [attributes, setAttributes] = useState<string[]>([])
+  const [selectedAttributes, setSelectedAttributes] = useState<string[]>([])
 
   // load states
   useEffect(() => {
@@ -32,84 +32,119 @@ function App() {
       .catch(() => message.error('Failed to load counties'))
   }, [state])
 
-  const reportOptions = useMemo(() => [
-    'Location Level',
-    'Block Level',
-  ], [])
+  // load attributes once user has chosen at least one county (as requested)
+  useEffect(() => {
+    if (!state || countySelection.length === 0) { setAttributes([]); setSelectedAttributes([]); return }
+    axios.get(`${API_BASE}/export/attributes`, { params: { state }})
+      .then(res => setAttributes(res.data))
+      .catch(() => message.error('Failed to load attributes'))
+  }, [state, countySelection])
 
-  const fetchReport = async () => {
-    if (!state || !report) { message.warning('Select state and report level'); return }
+  const exportCsv = async () => {
+    if (!state) { message.warning('Select a state'); return }
+    if (countySelection.length === 0) { message.warning('Select at least one county'); return }
+    if (selectedAttributes.length === 0) { message.warning('Select attributes to export'); return }
     setLoading(true)
     try {
-      const params: any = { script: report, state }
-      countySelection.forEach(c => {
-        if (!params.counties) params.counties = []
-        params.counties.push(c)
-      })
-      const res = await axios.get(`${API_BASE}/reports/run`, { params })
-      setData(res.data)
-    } catch (e) {
-      message.error('Failed to fetch report')
+      const body = { state, counties: countySelection, attributes: selectedAttributes }
+      const res = await axios.post(`${API_BASE}/export/csv`, body, { responseType: 'blob' })
+      const blob = new Blob([res.data], { type: 'text/csv;charset=utf-8;' })
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      // Try to extract filename from header, fallback
+      const cd = res.headers['content-disposition'] as string | undefined
+      let filename = 'export.csv'
+      if (cd) {
+        const m = /filename="?([^";]+)"?/i.exec(cd)
+        if (m && m[1]) filename = m[1]
+      }
+      a.download = filename
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err: any) {
+      try {
+        const blob: Blob | undefined = err?.response?.data
+        if (blob && (blob as any).text) {
+          const text = await (blob as any).text()
+          try {
+            const json = JSON.parse(text)
+            message.error(json.detail || 'Failed to export CSV')
+          } catch {
+            message.error(text || 'Failed to export CSV')
+          }
+        } else {
+          message.error(err?.message || 'Failed to export CSV')
+        }
+      } catch {
+        message.error('Failed to export CSV')
+      }
     } finally { setLoading(false) }
   }
-
-  const columns = data.columns.map((c, idx) => ({ title: c, dataIndex: idx, key: `${idx}` }))
-  const datasource = data.rows.map((r, i) => ({ key: i, ...Object.fromEntries(r.map((v, idx) => [idx, v])) }))
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
       <Header style={{ background: '#fff', borderBottom: '1px solid #eee' }}>
-        <Title level={3} style={{ margin: 0 }}>BDC Reports</Title>
+        <Title level={3} style={{ margin: 0 }}>BDC CSV Export</Title>
       </Header>
       <Content style={{ padding: 24 }}>
-        <Space direction="vertical" size="large" style={{ width: '100%' }}>
-          <Space wrap>
-            <div>
-              <div>State</div>
+        <Card bordered style={{ maxWidth: 1100, margin: '0 auto' }} bodyStyle={{ paddingBottom: 16 }}>
+          <Row gutter={[16, 16]}>
+            <Col xs={24} md={8}>
+              <div style={{ marginBottom: 8 }}>State</div>
               <Select
                 showSearch
-                style={{ width: 240 }}
+                style={{ width: '100%' }}
                 placeholder="Select state"
                 options={states.map(s => ({ label: s, value: s }))}
                 value={state}
                 onChange={setState}
                 filterOption={(input, option) => (option?.label as string).toLowerCase().includes(input.toLowerCase())}
               />
-            </div>
-            <div>
-              <div>Counties</div>
+            </Col>
+            <Col xs={24} md={8}>
+              <div style={{ marginBottom: 8 }}>Counties</div>
               <Select
                 mode="multiple"
                 allowClear
                 disabled={!state}
-                style={{ width: 360 }}
+                style={{ width: '100%' }}
                 placeholder="Select counties"
                 options={counties.map(c => ({ label: c, value: c }))}
                 value={countySelection}
                 onChange={setCountySelection}
               />
-            </div>
-            <div>
-              <div>Report level</div>
+            </Col>
+            <Col xs={24} md={8}>
+              <div style={{ marginBottom: 8 }}>Attributes</div>
               <Select
-                style={{ width: 240 }}
-                placeholder="Select report"
-                options={reportOptions.map(r => ({ label: r, value: r }))}
-                value={report}
-                onChange={setReport}
+                mode="multiple"
+                allowClear
+                style={{ width: '100%' }}
+                placeholder={state && countySelection.length > 0 ? 'Select attributes to export' : 'Select state and counties to load attributes'}
+                options={attributes.map(a => ({ label: a, value: a }))}
+                value={selectedAttributes}
+                onChange={setSelectedAttributes}
+                disabled={attributes.length === 0}
               />
-            </div>
-            <div style={{ alignSelf: 'end' }}>
-              <Button type="primary" onClick={fetchReport} loading={loading}>Fetch</Button>
-            </div>
+            </Col>
+          </Row>
+          <Divider style={{ margin: '16px 0' }} />
+          <Space wrap>
+            {state && <Tag color="blue">State: {state}</Tag>}
+            {countySelection.length > 0 && <Tag color="geekblue">Counties: {countySelection.length}</Tag>}
+            {selectedAttributes.length > 0 && <Tag color="green">Attributes: {selectedAttributes.length}</Tag>}
           </Space>
-          {report && (
-            <div>
-              Selected report: <Tag color="blue">{report}</Tag>
-            </div>
-          )}
-          <Table loading={loading} columns={columns} dataSource={datasource} scroll={{ x: true }} />
-        </Space>
+        </Card>
+        <div style={{ position: 'sticky', bottom: 0, background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(2px)', padding: '12px 0', marginTop: 16 }}>
+          <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', justifyContent: 'flex-end' }}>
+            <Button type="primary" size="large" onClick={exportCsv} loading={loading} disabled={attributes.length === 0}>
+              Export CSV
+            </Button>
+          </div>
+        </div>
       </Content>
       <Footer style={{ textAlign: 'center' }}>BDC © {new Date().getFullYear()}</Footer>
     </Layout>
