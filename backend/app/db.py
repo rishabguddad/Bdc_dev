@@ -20,7 +20,6 @@ _executor = ThreadPoolExecutor(max_workers=10)
 BASE_DIR = Path(__file__).resolve().parent.parent  # webapp/backend/app -> parent is webapp/backend
 
 class Settings(BaseSettings):
-    """Database connection settings loaded from environment or .env files."""
     DB_HOST: str
     DB_PORT: int = 5432
     DB_NAME: str
@@ -33,12 +32,10 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    """Load settings with optional Fernet-based decryption support.
-
-    If `.env.enc` exists and `ENV_ENC_KEY` is set, decrypt its contents into
-    process environment variables before constructing Settings. Also supports
-    per-variable encryption using values wrapped as `ENC(<token>)` for DB_USER
-    and DB_PASSWORD.
+    """
+    Load settings. If an encrypted env file exists at `.env.enc` and
+    the decryption key `ENV_ENC_KEY` is set, transparently decrypt it
+    into environment variables prior to Pydantic loading.
     """
     enc_path = BASE_DIR / ".env.enc"
     if enc_path.exists():
@@ -57,15 +54,20 @@ def get_settings() -> Settings:
             plaintext = fernet.decrypt(ciphertext).decode("utf-8")
         except InvalidToken as exc:  # type: ignore
             raise RuntimeError("Invalid ENV_ENC_KEY for decrypting .env.enc") from exc
-        # Parse plaintext .env content and inject into process env without overwriting pre-set envs
+        # Parse plaintext .env content and inject into process env
         for line in plaintext.splitlines():
             stripped = line.strip()
-            if not stripped or stripped.startswith("#") or "=" not in stripped:
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "=" not in stripped:
                 continue
             name, value = stripped.split("=", 1)
-            os.environ.setdefault(name.strip(), value.strip())
-
-    # Support per-variable encryption (values like ENC(<token>)) for sensitive fields
+            name = name.strip()
+            value = value.strip()
+            # Do not overwrite pre-set envs
+            os.environ.setdefault(name, value)
+    # Support per-variable encryption for DB credentials
+    # Convention: wrap encrypted value as ENC(<fernet-token>)
     def _maybe_decrypt_env(name: str) -> None:
         value = os.getenv(name)
         if not value:
@@ -73,17 +75,24 @@ def get_settings() -> Settings:
         if value.startswith("ENC(") and value.endswith(")"):
             key = os.getenv("ENV_ENC_KEY")
             if not key:
-                raise RuntimeError(f"{name} is encrypted. Set ENV_ENC_KEY to decrypt.")
+                raise RuntimeError(
+                    f"{name} is encrypted. Set ENV_ENC_KEY to decrypt."
+                )
             if Fernet is None:
-                raise RuntimeError("cryptography is required to decrypt encrypted env values.")
+                raise RuntimeError(
+                    "cryptography is required to decrypt encrypted env values."
+                )
             token = value[4:-1]
             try:
-                decrypted = Fernet(key.encode("utf-8")).decrypt(token.encode("utf-8")).decode("utf-8")
+                decrypted = Fernet(key.encode("utf-8")).decrypt(
+                    token.encode("utf-8")
+                ).decode("utf-8")
             except InvalidToken as exc:  # type: ignore
                 raise RuntimeError(f"Failed to decrypt {name} with provided ENV_ENC_KEY") from exc
             os.environ[name] = decrypted
 
-    # Preload plaintext .env for DB_USER/DB_PASSWORD only, if present
+    # If a plaintext .env exists, pre-load its values for DB_USER/DB_PASSWORD and decrypt if needed.
+    # Doing this before constructing Settings ensures environment variables override .env values inside Pydantic.
     env_path = BASE_DIR / ".env"
     if env_path.exists():
         for line in env_path.read_text(encoding="utf-8").splitlines():
@@ -95,18 +104,17 @@ def get_settings() -> Settings:
             value = value.strip()
             if name not in ("DB_USER", "DB_PASSWORD"):
                 continue
-            # Do not overwrite clear values
+            # If the process env already defines a clear value, keep it.
             if os.getenv(name) and not os.getenv(name, "").startswith("ENC("):
                 continue
             os.environ[name] = value
 
-    # Decrypt DB credentials if they are wrapped
+    # Only decrypt sensitive fields if wrapped after potential pre-load
     _maybe_decrypt_env("DB_USER")
     _maybe_decrypt_env("DB_PASSWORD")
     return Settings()
 
 class PgPool:
-    """Simple, lightweight connection pool for pg8000."""
     def __init__(self, min_size=1, max_size=10):
         s = get_settings()
         self._q: Queue[pg8000.Connection] = Queue(maxsize=max_size)
@@ -132,7 +140,6 @@ class PgPool:
 _pool: Optional[PgPool] = None
 
 def get_pool() -> PgPool:
-    """Get a global PgPool instance (lazy-created)."""
     global _pool
     if _pool is None:
         _pool = PgPool(min_size=1, max_size=10)
@@ -141,6 +148,5 @@ def get_pool() -> PgPool:
 # Helper to run blocking DB calls in thread pool
 
 def run_db(fn, *args, **kwargs):
-    """Run a blocking function in a thread pool and return awaitable future."""
     loop = asyncio.get_event_loop()
     return loop.run_in_executor(_executor, lambda: fn(*args, **kwargs))

@@ -6,10 +6,6 @@ router = APIRouter()
 
 @router.get("/states", response_model=List[str])
 async def get_states():
-    """List all state names available for selection.
-
-    Uses dim_states_detail to ensure consistent labeling on the frontend.
-    """
     pool = get_pool()
     def _fetch():
         conn = pool.getconn()
@@ -30,10 +26,6 @@ async def get_states():
 
 @router.get("/counties", response_model=List[str])
 async def get_counties(state: str):
-    """List counties for a given state name.
-
-    The export uses county names to filter; expose the values from dim_county.
-    """
     if not state:
         raise HTTPException(status_code=400, detail="state is required")
     pool = get_pool()
